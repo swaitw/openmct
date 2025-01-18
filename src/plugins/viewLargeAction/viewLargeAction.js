@@ -1,5 +1,5 @@
 /*****************************************************************************
- * Open MCT, Copyright (c) 2014-2021, United States Government
+ * Open MCT, Copyright (c) 2014-2024, United States Government
  * as represented by the Administrator of the National Aeronautics and Space
  * Administration. All rights reserved.
  *
@@ -20,69 +20,96 @@
  * at runtime from the About dialog for additional information.
  *****************************************************************************/
 
-import Preview from '@/ui/preview/Preview.vue';
+import mount from 'utils/mount';
 
-import Vue from 'vue';
+import PreviewContainer from '@/ui/preview/PreviewContainer.vue';
 
-export default class ViewLargeAction {
-    constructor(openmct) {
-        this.openmct = openmct;
+const VIEW_LARGE_ACTION_KEY = 'large.view';
 
-        this.cssClass = 'icon-items-expand';
-        this.description = 'View Large';
-        this.group = 'windowing';
-        this.key = 'large.view';
-        this.name = 'Large View';
-        this.priority = 1;
-        this.showInStatusBar = true;
+class ViewLargeAction {
+  constructor(openmct) {
+    this.openmct = openmct;
+
+    this.cssClass = 'icon-items-expand';
+    this.description = 'View Large';
+    this.group = 'windowing';
+    this.key = VIEW_LARGE_ACTION_KEY;
+    this.name = 'Large View';
+    this.priority = 1;
+    this.showInStatusBar = true;
+    this.destroy = null;
+    this.preview = null;
+  }
+
+  invoke(objectPath, view) {
+    performance.mark('viewlarge.start');
+    const childElement = view?.parentElement?.firstElementChild;
+    if (!childElement) {
+      const message = 'ViewLargeAction: missing element';
+      this.openmct.notifications.error(message);
+      throw new Error(message);
     }
 
-    invoke(objectPath, view) {
-        const parentElement = view.parentElement;
-        let childElement = parentElement && parentElement.firstChild;
-        if (!childElement) {
-            const message = "ViewLargeAction: missing element";
-            this.openmct.notifications.error(message);
-            throw new Error(message);
-        }
+    this._expand(objectPath, view);
+  }
 
-        this._expand(objectPath, childElement);
-    }
+  appliesTo(objectPath, view) {
+    const childElement = view?.parentElement?.firstElementChild;
 
-    appliesTo(objectPath, view = {}) {
-        const parentElement = view.parentElement;
-        const element = parentElement && parentElement.firstChild;
-        const viewLargeAction = element && !element.classList.contains('js-main-container')
-            && !this.openmct.router.isNavigatedObject(objectPath);
+    return (
+      childElement &&
+      !childElement?.classList?.contains('js-main-container') &&
+      !this.openmct.router.isNavigatedObject(objectPath)
+    );
+  }
 
-        return viewLargeAction;
-    }
+  _expand(objectPath, view) {
+    const element = this._getPreview(objectPath, view);
+    view.onPreviewModeChange?.({ isPreviewing: true });
 
-    _expand(objectPath, childElement) {
-        const parentElement = childElement.parentElement;
+    this.overlay = this.openmct.overlays.overlay({
+      element,
+      size: 'large',
+      autoHide: false,
+      onDestroy: () => {
+        this.destroy();
+        this.preview = null;
+        view.onPreviewModeChange?.();
+      }
+    });
+  }
 
-        this.overlay = this.openmct.overlays.overlay({
-            element: this._getPreview(objectPath),
-            size: 'large',
-            autoHide: false,
-            onDestroy() {
-                parentElement.append(childElement);
-            }
-        });
-    }
+  _getPreview(objectPath, view) {
+    const { vNode, destroy } = mount(
+      {
+        components: {
+          PreviewContainer
+        },
+        provide: {
+          openmct: this.openmct,
+          objectPath
+        },
+        data() {
+          return {
+            view
+          };
+        },
+        template: '<preview-container :existing-view="view"></preview-container>'
+      },
+      {
+        app: this.openmct.app
+      }
+    );
+    this.preview = vNode.componentInstance;
+    this.destroy = () => {
+      destroy();
+      this.preview = null;
+    };
 
-    _getPreview(objectPath) {
-        const preview = new Vue({
-            components: {
-                Preview
-            },
-            provide: {
-                openmct: this.openmct,
-                objectPath
-            },
-            template: '<Preview></Preview>'
-        });
-
-        return preview.$mount().$el;
-    }
+    return this.preview.$el;
+  }
 }
+
+export { VIEW_LARGE_ACTION_KEY };
+
+export default ViewLargeAction;
